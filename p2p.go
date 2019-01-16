@@ -308,7 +308,7 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 	return nil
 }
 
-// connect connects a peer given the multi address
+// Connect connects a peer given the multi address
 func (h *Host) Connect(mas []multiaddr.Multiaddr) error {
 	if len(mas) == 0 {
 		errors.New("empty address slice")
@@ -368,7 +368,7 @@ func (h *Host) HostIdentity() string { return h.host.ID().Pretty() }
 // OverlayIdentity returns the overlay identity string
 func (h *Host) OverlayIdentity() string { return h.kadKey.String() }
 
-// MultiAddress returns the multi address
+// Addresses returns the multi address
 func (h *Host) Addresses() []multiaddr.Multiaddr {
 	hostID, _ := multiaddr.NewMultiaddr(fmt.Sprintf("/ipfs/%s", h.HostIdentity()))
 	addrs := make([]multiaddr.Multiaddr, 0)
