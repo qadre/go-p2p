@@ -59,8 +59,9 @@ type Config struct {
 	BlackListCleanupInterval time.Duration
 	AvgNumMsgsPerSec         int
 	BurstNumMsgsPerSec       int
-	ValidationConcurrency    int
+	ValidationChanSize       int
 	ConnGracePeriod          time.Duration
+	RateLimit                bool
 }
 
 // DefaultConfig is a set of default configs
@@ -81,8 +82,9 @@ var DefaultConfig = Config{
 	BlackListCleanupInterval: 600 * time.Second,
 	AvgNumMsgsPerSec:         50,
 	BurstNumMsgsPerSec:       400,
-	ValidationConcurrency:    100,
+	ValidationChanSize:       500,
 	ConnGracePeriod:          0,
+	RateLimit:                false,
 }
 
 // Option defines the option function to modify the config for a host
@@ -148,6 +150,14 @@ func ConnectTimeout(timout time.Duration) Option {
 func MasterKey(masterKey string) Option {
 	return func(cfg *Config) error {
 		cfg.MasterKey = masterKey
+		return nil
+	}
+}
+
+// RateLimit is to indicate limiting msg rate from peers
+func RateLimit() Option {
+	return func(cfg *Config) error {
+		cfg.Gossip = true
 		return nil
 	}
 }
@@ -362,7 +372,7 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 		h.host,
 		pubsub.WithMessageSigning(true),
 		pubsub.WithStrictSignatureVerification(true),
-		pubsub.WithValidateThrottle(h.cfg.ValidationConcurrency),
+		pubsub.WithValidateThrottle(h.cfg.ValidationChanSize),
 		pubsub.WithBlacklist(blacklist),
 	)
 	if err != nil {
@@ -522,6 +532,9 @@ func (h *Host) Close() error {
 }
 
 func (h *Host) allowSource(src peer.ID) (bool, error) {
+	if !h.cfg.RateLimit {
+		return true, nil
+	}
 	var limiter *rate.Limiter
 	val, ok := h.limiters.Get(src)
 	if ok {
