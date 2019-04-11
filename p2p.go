@@ -59,6 +59,7 @@ type Config struct {
 	BlackListCleanupInterval time.Duration
 	AvgNumMsgsPerSec         int
 	BurstNumMsgsPerSec       int
+	ValidationConcurrency    int
 	ConnGracePeriod          time.Duration
 }
 
@@ -80,6 +81,7 @@ var DefaultConfig = Config{
 	BlackListCleanupInterval: 600 * time.Second,
 	AvgNumMsgsPerSec:         50,
 	BurstNumMsgsPerSec:       400,
+	ValidationConcurrency:    100,
 	ConnGracePeriod:          0,
 }
 
@@ -319,19 +321,21 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 				Logger().Error("Error when closing a unicast stream.", zap.Error(err))
 			}
 		}()
-		src := stream.Conn().RemotePeer()
-		allowed, err := h.allowSource(src)
-		if err != nil {
-			Logger().Error("Error when checking if the source is allowed.", zap.Error(err))
-			return
-		}
+		/*
+			src := stream.Conn().RemotePeer()
+			allowed, err := h.allowSource(src)
+			if err != nil {
+				Logger().Error("Error when checking if the source is allowed.", zap.Error(err))
+				return
+			}
+			if !allowed {
+				// TODO: blacklist src for unicast too
+				return
+			}
+		*/
 		data, err := ioutil.ReadAll(stream)
 		if err != nil {
 			Logger().Error("Error when subscribing a unicast message.", zap.Error(err))
-			return
-		}
-		if !allowed {
-			// TODO: blacklist src for unicast too
 			return
 		}
 		ctx := context.WithValue(context.Background(), unicastCtxKey{}, stream)
@@ -356,8 +360,9 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 	pub, err := h.newPubSub(
 		h.ctx,
 		h.host,
-		pubsub.WithMessageSigning(false),
-		pubsub.WithStrictSignatureVerification(false),
+		pubsub.WithMessageSigning(true),
+		pubsub.WithStrictSignatureVerification(true),
+		pubsub.WithValidateThrottle(h.cfg.ValidationConcurrency),
 		pubsub.WithBlacklist(blacklist),
 	)
 	if err != nil {
