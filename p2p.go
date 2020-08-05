@@ -19,22 +19,21 @@ import (
 	"github.com/libp2p/go-libp2p"
 	relay "github.com/libp2p/go-libp2p-circuit"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
+	pnet "github.com/libp2p/go-libp2p-core/pnet"
 	crypto "github.com/libp2p/go-libp2p-crypto"
 	discovery "github.com/libp2p/go-libp2p-discovery"
 	host "github.com/libp2p/go-libp2p-host"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	dhtopts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	net "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 	peerstore "github.com/libp2p/go-libp2p-peerstore"
-	pnet "github.com/libp2p/go-libp2p-pnet"
 	protocol "github.com/libp2p/go-libp2p-protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	stream "github.com/libp2p/go-libp2p-transport-upgrader"
+	yamux "github.com/libp2p/go-libp2p-yamux"
 	"github.com/libp2p/go-tcp-transport"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
-	sm_yamux "github.com/whyrusleeping/go-smux-yamux"
 	"go.uber.org/zap"
 )
 
@@ -284,7 +283,7 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		libp2p.Transport(func(upgrader *stream.Upgrader) *tcp.TcpTransport {
 			return &tcp.TcpTransport{Upgrader: upgrader, ConnectTimeout: cfg.ConnectTimeout}
 		}),
-		libp2p.Muxer("/yamux/2.0.0", sm_yamux.DefaultTransport),
+		libp2p.Muxer("/yamux/2.0.0", yamux.DefaultTransport),
 		libp2p.ConnectionManager(connmgr.NewConnManager(cfg.ConnLowWater, cfg.ConnHighWater, cfg.ConnGracePeriod)),
 	}
 	if !cfg.SecureIO {
@@ -306,7 +305,7 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		if err != nil {
 			return nil, err
 		}
-		p, err := pnet.NewProtector(f)
+		p, err := pnet.DecodeV1PSK(f)
 		if err != nil {
 			return nil, err
 		}
@@ -317,7 +316,7 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	kad, err := dht.New(ctx, host, dhtopts.Protocols(ProtocolDHT))
+	kad, err := dht.New(ctx, host, dht.ProtocolPrefix(ProtocolDHT))
 	if err != nil {
 	}
 	if err := kad.Bootstrap(ctx); err != nil {

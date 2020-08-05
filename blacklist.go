@@ -22,8 +22,9 @@ func NewLRUBlacklist(cap int) (*LRUBlacklist, error) {
 }
 
 // Add adds a peer ID
-func (b *LRUBlacklist) Add(p peer.ID) {
+func (b *LRUBlacklist) Add(p peer.ID) bool {
 	b.lru.Add(p, nil)
+	return true
 }
 
 // Remove removes a peer ID
