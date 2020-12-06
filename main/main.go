@@ -151,7 +151,7 @@ func main() {
 		case <-tick:
 			var err error
 			if broadcast {
-				err = host.Broadcast("measurement", []byte(fmt.Sprintf("%s", host.HostIdentity())))
+				err = host.Broadcast(context.Background(), "measurement", []byte(fmt.Sprintf("%s", host.HostIdentity())))
 			} else {
 				neighbors, err := host.Neighbors(context.Background())
 				if err != nil {

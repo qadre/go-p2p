@@ -2,7 +2,7 @@ package p2p
 
 import (
 	lru "github.com/hashicorp/golang-lru"
-	peer "github.com/libp2p/go-libp2p-peer"
+	peer "github.com/libp2p/go-libp2p-core/peer"
 )
 
 // LRUBlacklist is a blacklist implementation using an LRU cache
@@ -22,8 +22,9 @@ func NewLRUBlacklist(cap int) (*LRUBlacklist, error) {
 }
 
 // Add adds a peer ID
-func (b *LRUBlacklist) Add(p peer.ID) {
+func (b *LRUBlacklist) Add(p peer.ID) bool {
 	b.lru.Add(p, nil)
+	return true
 }
 
 // Remove removes a peer ID
