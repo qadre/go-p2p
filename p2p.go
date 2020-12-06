@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/ioutil"
 	"math/rand"
-	"os"
 	"time"
 
 	"github.com/pkg/errors"
@@ -19,28 +18,21 @@ import (
 	"github.com/libp2p/go-libp2p"
 	relay "github.com/libp2p/go-libp2p-circuit"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
+	core "github.com/libp2p/go-libp2p-core"
 	crypto "github.com/libp2p/go-libp2p-crypto"
 	discovery "github.com/libp2p/go-libp2p-discovery"
 	host "github.com/libp2p/go-libp2p-host"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	dhtopts "github.com/libp2p/go-libp2p-kad-dht/opts"
-	net "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 	peerstore "github.com/libp2p/go-libp2p-peerstore"
-	pnet "github.com/libp2p/go-libp2p-pnet"
 	protocol "github.com/libp2p/go-libp2p-protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	stream "github.com/libp2p/go-libp2p-transport-upgrader"
 	"github.com/libp2p/go-tcp-transport"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
-	sm_yamux "github.com/whyrusleeping/go-smux-yamux"
 	"go.uber.org/zap"
 )
-
-func init() {
-	multiaddr.SwapToP2pMultiaddrs()
-}
 
 // HandleBroadcast defines the callback function triggered when a broadcast message reaches a host
 type HandleBroadcast func(ctx context.Context, data []byte) error
@@ -77,9 +69,6 @@ type RateLimitConfig struct {
 	PeerAvg            int `yaml:"peerAvg"`
 	PeerBurst          int `yaml:"peerBurst"`
 }
-
-// ProtocolDHT is the DHT protocol ID
-var ProtocolDHT protocol.ID = "/iotex/kad/1.0.0"
 
 // DefaultConfig is a set of default configs
 var DefaultConfig = Config{
@@ -215,7 +204,7 @@ func PrivateNetworkPSK(privateNetworkPSK string) Option {
 
 // Host is the main struct that represents a host that communicating with the rest of the P2P networks
 type Host struct {
-	host           host.Host
+	host           core.Host
 	cfg            Config
 	topics         map[string]interface{}
 	kad            *dht.IpfsDHT
@@ -284,7 +273,6 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		libp2p.Transport(func(upgrader *stream.Upgrader) *tcp.TcpTransport {
 			return &tcp.TcpTransport{Upgrader: upgrader, ConnectTimeout: cfg.ConnectTimeout}
 		}),
-		libp2p.Muxer("/yamux/2.0.0", sm_yamux.DefaultTransport),
 		libp2p.ConnectionManager(connmgr.NewConnManager(cfg.ConnLowWater, cfg.ConnHighWater, cfg.ConnGracePeriod)),
 	}
 	if !cfg.SecureIO {
@@ -302,22 +290,14 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 
 	// private p2p network
 	if cfg.PrivateNetworkPSK != "" {
-		f, err := os.Open(cfg.PrivateNetworkPSK)
-		if err != nil {
-			return nil, err
-		}
-		p, err := pnet.NewProtector(f)
-		if err != nil {
-			return nil, err
-		}
-		opts = append(opts, libp2p.PrivateNetwork(p))
+		opts = append(opts, libp2p.PrivateNetwork([]byte(cfg.PrivateNetworkPSK)))
 	}
 
 	host, err := libp2p.New(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
-	kad, err := dht.New(ctx, host, dhtopts.Protocols(ProtocolDHT))
+	kad, err := dht.New(ctx, host, dht.ProtocolPrefix("/iotex"))
 	if err != nil {
 	}
 	if err := kad.Bootstrap(ctx); err != nil {
@@ -374,7 +354,7 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 	if _, ok := h.topics[topic]; ok {
 		return nil
 	}
-	h.host.SetStreamHandler(protocol.ID(topic), func(stream net.Stream) {
+	h.host.SetStreamHandler(core.ProtocolID(topic), func(stream core.Stream) {
 		defer func() {
 			if err := stream.Close(); err != nil {
 				Logger().Error("Error when closing a unicast stream.", zap.Error(err))
@@ -423,14 +403,16 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 	pub, err := h.newPubSub(
 		h.ctx,
 		h.host,
-		pubsub.WithMessageSigning(true),
-		pubsub.WithStrictSignatureVerification(true),
 		pubsub.WithBlacklist(blacklist),
 	)
 	if err != nil {
 		return err
 	}
-	sub, err := pub.Subscribe(topic)
+	top, err := pub.Join(topic)
+	if err != nil {
+		return err
+	}
+	sub, err := top.Subscribe()
 	if err != nil {
 		return err
 	}
@@ -523,11 +505,10 @@ func (h *Host) Unicast(ctx context.Context, target peerstore.PeerInfo, topic str
 	if err != nil {
 		return err
 	}
-	defer func() { err = stream.Close() }()
 	if _, err = stream.Write(data); err != nil {
 		return err
 	}
-	return nil
+	return stream.Close()
 }
 
 // HostIdentity returns the host identity string
