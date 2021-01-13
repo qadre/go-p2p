@@ -376,7 +376,7 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 	}
 	h.host.SetStreamHandler(protocol.ID(topic), func(stream net.Stream) {
 		defer func() {
-			if err := stream.Close(); err != nil {
+			if err := stream.Reset(); err != nil {
 				Logger().Error("Error when closing a unicast stream.", zap.Error(err))
 			}
 		}()
@@ -480,6 +480,7 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 // ConnectWithMultiaddr connects a peer given the multi address
 func (h *Host) ConnectWithMultiaddr(ctx context.Context, ma multiaddr.Multiaddr) error {
 	target, err := peerstore.InfoFromP2pAddr(ma)
+	fmt.Println("target =", target.String())
 	if err != nil {
 		return err
 	}
