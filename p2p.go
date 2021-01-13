@@ -27,7 +27,6 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	tptu "github.com/libp2p/go-libp2p-transport-upgrader"
-	yamux "github.com/libp2p/go-libp2p-yamux"
 	"github.com/libp2p/go-tcp-transport"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
@@ -275,7 +274,8 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		libp2p.Transport(func(upgrader *tptu.Upgrader) *tcp.TcpTransport {
 			return &tcp.TcpTransport{Upgrader: upgrader, ConnectTimeout: cfg.ConnectTimeout}
 		}),
-		libp2p.Muxer("/yamux/1.0.0", yamux.DefaultTransport),
+		libp2p.DefaultMuxers,
+		libp2p.DefaultSecurity,
 		libp2p.ConnectionManager(connmgr.NewConnManager(cfg.ConnLowWater, cfg.ConnHighWater, cfg.ConnGracePeriod)),
 	}
 	if !cfg.SecureIO {
