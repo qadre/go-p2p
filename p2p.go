@@ -224,6 +224,7 @@ type Host struct {
 	pubs           map[string]*pubsub.PubSub
 	blacklists     map[string]*LRUBlacklist
 	subs           map[string]*pubsub.Subscription
+	uniStreams     map[string]net.Stream
 	close          chan interface{}
 	ctx            context.Context
 	peersLimiters  *lru.Cache
@@ -346,6 +347,7 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		pubs:           make(map[string]*pubsub.PubSub),
 		blacklists:     make(map[string]*LRUBlacklist),
 		subs:           make(map[string]*pubsub.Subscription),
+		uniStreams:     make(map[string]net.Stream),
 		close:          make(chan interface{}),
 		ctx:            ctx,
 		peersLimiters:  limiters,
@@ -519,15 +521,13 @@ func (h *Host) Unicast(ctx context.Context, target peerstore.PeerInfo, topic str
 	if err := h.Connect(ctx, target); err != nil {
 		return err
 	}
-	stream, err := h.host.NewStream(ctx, target.ID, protocol.ID(topic))
+	stream, err := h.createUnicastStream(ctx, target.ID, topic)
+	defer func() { err = stream.Close() }()
 	if err != nil {
 		return err
 	}
-	defer func() { err = stream.Close() }()
-	if _, err = stream.Write(data); err != nil {
-		return err
-	}
-	return nil
+	_, err = stream.Write(data)
+	return err
 }
 
 // HostIdentity returns the host identity string
@@ -575,6 +575,9 @@ func (h *Host) Close() error {
 	for _, sub := range h.subs {
 		sub.Cancel()
 	}
+	for _, stream := range h.uniStreams {
+		stream.Reset()
+	}
 	if err := h.kad.Close(); err != nil {
 		return err
 	}
@@ -582,6 +585,21 @@ func (h *Host) Close() error {
 		return err
 	}
 	return nil
+}
+
+func (h *Host) createUnicastStream(ctx context.Context, target peer.ID, topic string) (net.Stream, error) {
+	id := string(target) + topic
+	if stream, ok := h.uniStreams[id]; ok {
+		return stream, nil
+	}
+
+	// create a new stream and save it
+	stream, err := h.host.NewStream(ctx, target, protocol.ID(topic))
+	if err != nil {
+		return nil, err
+	}
+	h.uniStreams[id] = stream
+	return stream, nil
 }
 
 func (h *Host) allowSource(src peer.ID) (bool, error) {
