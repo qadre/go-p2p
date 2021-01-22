@@ -11,6 +11,8 @@ import (
 	"os"
 	"time"
 
+	smux "github.com/libp2p/go-libp2p-core/mux"
+	yamux "github.com/libp2p/go-libp2p-yamux"
 	"github.com/pkg/errors"
 	"golang.org/x/time/rate"
 
@@ -19,28 +21,20 @@ import (
 	"github.com/libp2p/go-libp2p"
 	relay "github.com/libp2p/go-libp2p-circuit"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
-	crypto "github.com/libp2p/go-libp2p-crypto"
+	core "github.com/libp2p/go-libp2p-core"
+	"github.com/libp2p/go-libp2p-core/crypto"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
 	discovery "github.com/libp2p/go-libp2p-discovery"
-	host "github.com/libp2p/go-libp2p-host"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	dhtopts "github.com/libp2p/go-libp2p-kad-dht/opts"
-	net "github.com/libp2p/go-libp2p-net"
-	peer "github.com/libp2p/go-libp2p-peer"
-	peerstore "github.com/libp2p/go-libp2p-peerstore"
-	pnet "github.com/libp2p/go-libp2p-pnet"
 	protocol "github.com/libp2p/go-libp2p-protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	stream "github.com/libp2p/go-libp2p-transport-upgrader"
 	"github.com/libp2p/go-tcp-transport"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
-	sm_yamux "github.com/whyrusleeping/go-smux-yamux"
 	"go.uber.org/zap"
 )
-
-func init() {
-	multiaddr.SwapToP2pMultiaddrs()
-}
 
 // HandleBroadcast defines the callback function triggered when a broadcast message reaches a host
 type HandleBroadcast func(ctx context.Context, data []byte) error
@@ -78,9 +72,6 @@ type RateLimitConfig struct {
 	PeerBurst          int `yaml:"peerBurst"`
 }
 
-// ProtocolDHT is the DHT protocol ID
-var ProtocolDHT protocol.ID = "/iotex/kad/1.0.0"
-
 // DefaultConfig is a set of default configs
 var DefaultConfig = Config{
 	HostName:                 "127.0.0.1",
@@ -100,7 +91,6 @@ var DefaultConfig = Config{
 	ConnGracePeriod:          0,
 	EnableRateLimit:          false,
 	RateLimit:                DefaultRatelimitConfig,
-	PrivateNetworkPSK:        "",
 }
 
 // DefaultRatelimitConfig is the default rate limit config
@@ -205,23 +195,15 @@ func WithConnectionManagerConfig(lo, hi int, grace time.Duration) Option {
 	}
 }
 
-// PrivateNetworkPSK is to determine network identifier
-func PrivateNetworkPSK(privateNetworkPSK string) Option {
-	return func(cfg *Config) error {
-		cfg.PrivateNetworkPSK = privateNetworkPSK
-		return nil
-	}
-}
-
 // Host is the main struct that represents a host that communicating with the rest of the P2P networks
 type Host struct {
-	host           host.Host
-	cfg            Config
-	topics         map[string]interface{}
-	kad            *dht.IpfsDHT
-	kadKey         cid.Cid
-	newPubSub      func(ctx context.Context, h host.Host, opts ...pubsub.Option) (*pubsub.PubSub, error)
-	pubs           map[string]*pubsub.PubSub
+	host      core.Host
+	cfg       Config
+	topics    map[string]*pubsub.Topic
+	kad       *dht.IpfsDHT
+	kadKey    cid.Cid
+	newPubSub func(ctx context.Context, h core.Host, opts ...pubsub.Option) (*pubsub.PubSub, error)
+	//pubs           map[string]*pubsub.PubSub
 	blacklists     map[string]*LRUBlacklist
 	subs           map[string]*pubsub.Subscription
 	close          chan interface{}
@@ -284,7 +266,7 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		libp2p.Transport(func(upgrader *stream.Upgrader) *tcp.TcpTransport {
 			return &tcp.TcpTransport{Upgrader: upgrader, ConnectTimeout: cfg.ConnectTimeout}
 		}),
-		libp2p.Muxer("/yamux/2.0.0", sm_yamux.DefaultTransport),
+		libp2p.Muxer("/yamux/1.0.0", yamuxTransport()),
 		libp2p.ConnectionManager(connmgr.NewConnManager(cfg.ConnLowWater, cfg.ConnHighWater, cfg.ConnGracePeriod)),
 	}
 	if !cfg.SecureIO {
@@ -300,24 +282,11 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		opts = append(opts, libp2p.DisableRelay())
 	}
 
-	// private p2p network
-	if cfg.PrivateNetworkPSK != "" {
-		f, err := os.Open(cfg.PrivateNetworkPSK)
-		if err != nil {
-			return nil, err
-		}
-		p, err := pnet.NewProtector(f)
-		if err != nil {
-			return nil, err
-		}
-		opts = append(opts, libp2p.PrivateNetwork(p))
-	}
-
 	host, err := libp2p.New(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
-	kad, err := dht.New(ctx, host, dhtopts.Protocols(ProtocolDHT))
+	kad, err := dht.New(ctx, host)
 	if err != nil {
 	}
 	if err := kad.Bootstrap(ctx); err != nil {
@@ -337,13 +306,13 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		return nil, err
 	}
 	myHost := Host{
-		host:           host,
-		cfg:            cfg,
-		topics:         make(map[string]interface{}),
-		kad:            kad,
-		kadKey:         cid,
-		newPubSub:      newPubSub,
-		pubs:           make(map[string]*pubsub.PubSub),
+		host:      host,
+		cfg:       cfg,
+		topics:    make(map[string]*pubsub.Topic),
+		kad:       kad,
+		kadKey:    cid,
+		newPubSub: newPubSub,
+		//pubs:           make(map[string]*pubsub.PubSub),
 		blacklists:     make(map[string]*LRUBlacklist),
 		subs:           make(map[string]*pubsub.Subscription),
 		close:          make(chan interface{}),
@@ -374,7 +343,7 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 	if _, ok := h.topics[topic]; ok {
 		return nil
 	}
-	h.host.SetStreamHandler(protocol.ID(topic), func(stream net.Stream) {
+	h.host.SetStreamHandler(core.ProtocolID(topic), func(stream network.Stream) {
 		defer func() {
 			if err := stream.Close(); err != nil {
 				Logger().Error("Error when closing a unicast stream.", zap.Error(err))
@@ -413,9 +382,9 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 // AddBroadcastPubSub adds a broadcast topic that the host will pay attention to. This need to be called before using
 // Connect/JoinOverlay. Otherwise, pubsub may not be aware of the existing overlay topology
 func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error {
-	if _, ok := h.pubs[topic]; ok {
-		return nil
-	}
+	//if _, ok := h.pubs[topic]; ok {
+	//	return nil
+	//}
 	blacklist, err := NewLRUBlacklist(h.cfg.BlackListLRUSize)
 	if err != nil {
 		return err
@@ -423,18 +392,20 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 	pub, err := h.newPubSub(
 		h.ctx,
 		h.host,
-		pubsub.WithMessageSigning(true),
-		pubsub.WithStrictSignatureVerification(true),
 		pubsub.WithBlacklist(blacklist),
 	)
 	if err != nil {
 		return err
 	}
-	sub, err := pub.Subscribe(topic)
+	t, err := pub.Join(topic)
 	if err != nil {
 		return err
 	}
-	h.pubs[topic] = pub
+	sub, err := t.Subscribe()
+	if err != nil {
+		return err
+	}
+	//h.pubs[topic] = pub
 	h.blacklists[topic] = blacklist
 	h.subs[topic] = sub
 	go func() {
@@ -479,7 +450,7 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 
 // ConnectWithMultiaddr connects a peer given the multi address
 func (h *Host) ConnectWithMultiaddr(ctx context.Context, ma multiaddr.Multiaddr) error {
-	target, err := peerstore.InfoFromP2pAddr(ma)
+	target, err := peer.AddrInfoFromP2pAddr(ma)
 	if err != nil {
 		return err
 	}
@@ -494,7 +465,7 @@ func (h *Host) ConnectWithMultiaddr(ctx context.Context, ma multiaddr.Multiaddr)
 }
 
 // Connect connects a peer.
-func (h *Host) Connect(ctx context.Context, target peerstore.PeerInfo) error {
+func (h *Host) Connect(ctx context.Context, target peer.AddrInfo) error {
 	if err := h.host.Connect(ctx, target); err != nil {
 		return err
 	}
@@ -507,15 +478,15 @@ func (h *Host) Connect(ctx context.Context, target peerstore.PeerInfo) error {
 
 // Broadcast sends a message to the hosts who subscribe the topic
 func (h *Host) Broadcast(topic string, data []byte) error {
-	pub, ok := h.pubs[topic]
+	t, ok := h.topics[topic]
 	if !ok {
 		return nil
 	}
-	return pub.Publish(topic, data)
+	return t.Publish(context.Background(), data)
 }
 
 // Unicast sends a message to a peer on the given address
-func (h *Host) Unicast(ctx context.Context, target peerstore.PeerInfo, topic string, data []byte) error {
+func (h *Host) Unicast(ctx context.Context, target peer.AddrInfo, topic string, data []byte) error {
 	if err := h.Connect(ctx, target); err != nil {
 		return err
 	}
@@ -546,13 +517,13 @@ func (h *Host) Addresses() []multiaddr.Multiaddr {
 	return addrs
 }
 
-// Info returns host's perr info.
-func (h *Host) Info() peerstore.PeerInfo {
-	return peerstore.PeerInfo{ID: h.host.ID(), Addrs: h.host.Addrs()}
+// Info returns host's peer info.
+func (h *Host) Info() peer.AddrInfo {
+	return peer.AddrInfo{ID: h.host.ID(), Addrs: h.host.Addrs()}
 }
 
 // Neighbors returns the closest peer addresses
-func (h *Host) Neighbors(ctx context.Context) ([]peerstore.PeerInfo, error) {
+func (h *Host) Neighbors(ctx context.Context) ([]peer.AddrInfo, error) {
 	peers := h.host.Peerstore().Peers()
 	dedupedPeers := make(map[string]peer.ID)
 	for _, p := range peers {
@@ -562,7 +533,7 @@ func (h *Host) Neighbors(ctx context.Context) ([]peerstore.PeerInfo, error) {
 		}
 		dedupedPeers[idStr] = p
 	}
-	neighbors := make([]peerstore.PeerInfo, 0)
+	neighbors := make([]peer.AddrInfo, 0)
 	for _, p := range dedupedPeers {
 		neighbors = append(neighbors, h.kad.FindLocal(p))
 	}
@@ -610,4 +581,14 @@ func generateKeyPair(masterKey string) (crypto.PrivKey, crypto.PubKey, error) {
 	seed := int64(binary.BigEndian.Uint64(seedBytes))
 	r := rand.New(rand.NewSource(seed))
 	return crypto.GenerateKeyPairWithReader(crypto.Ed25519, 2048, r)
+}
+
+func yamuxTransport() smux.Multiplexer {
+	tpt := *yamux.DefaultTransport
+	tpt.AcceptBacklog = 512
+	if os.Getenv("YAMUX_DEBUG") != "" {
+		tpt.LogOutput = os.Stderr
+	}
+
+	return &tpt
 }
