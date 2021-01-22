@@ -306,13 +306,12 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		return nil, err
 	}
 	myHost := Host{
-		host:      host,
-		cfg:       cfg,
-		topics:    make(map[string]*pubsub.Topic),
-		kad:       kad,
-		kadKey:    cid,
-		newPubSub: newPubSub,
-		//pubs:           make(map[string]*pubsub.PubSub),
+		host:           host,
+		cfg:            cfg,
+		topics:         make(map[string]*pubsub.Topic),
+		kad:            kad,
+		kadKey:         cid,
+		newPubSub:      newPubSub,
 		blacklists:     make(map[string]*LRUBlacklist),
 		subs:           make(map[string]*pubsub.Subscription),
 		close:          make(chan interface{}),
@@ -325,7 +324,7 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 	for _, ma := range myHost.Addresses() {
 		addrs = append(addrs, ma.String())
 	}
-	Logger().Info("P2p host started.",
+	Logger().Info("p2p host started.",
 		zap.Strings("address", addrs),
 		zap.Bool("secureIO", myHost.cfg.SecureIO),
 		zap.Bool("gossip", myHost.cfg.Gossip))
@@ -382,9 +381,6 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 // AddBroadcastPubSub adds a broadcast topic that the host will pay attention to. This need to be called before using
 // Connect/JoinOverlay. Otherwise, pubsub may not be aware of the existing overlay topology
 func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error {
-	//if _, ok := h.pubs[topic]; ok {
-	//	return nil
-	//}
 	blacklist, err := NewLRUBlacklist(h.cfg.BlackListLRUSize)
 	if err != nil {
 		return err
