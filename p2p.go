@@ -2,12 +2,10 @@ package p2p
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/binary"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math/rand"
 	"os"
 	"time"
 
@@ -227,23 +225,24 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 	if masterKey == "" {
 		masterKey = fmt.Sprintf("%s:%d", ip, cfg.Port)
 	}
-	sk, _, err := generateKeyPair(masterKey)
+	sk, _, err := generateKeyPair()
 	if err != nil {
 		return nil, err
 	}
 	var extMultiAddr multiaddr.Multiaddr
 	// Set external address and replace private key it external host name is given
 	if cfg.ExternalHostName != "" {
-		extIP, err := EnsureIPv4(cfg.ExternalHostName)
+		var extIP string
+		extIP, err = EnsureIPv4(cfg.ExternalHostName)
 		if err != nil {
 			return nil, err
 		}
-		masterKey := cfg.MasterKey
+		masterKey = cfg.MasterKey
 		// If ID is not given use network address instead
 		if masterKey == "" {
 			masterKey = fmt.Sprintf("%s:%d", cfg.ExternalHostName, cfg.ExternalPort)
 		}
-		sk, _, err = generateKeyPair(masterKey)
+		sk, _, err = generateKeyPair()
 		if err != nil {
 			return nil, err
 		}
@@ -284,25 +283,32 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	kad, err := dht.New(ctx, host)
 	if err != nil {
-	}
-	if err := kad.Bootstrap(ctx); err != nil {
 		return nil, err
 	}
+
+	if err = kad.Bootstrap(ctx); err != nil {
+		return nil, err
+	}
+
 	newPubSub := pubsub.NewFloodSub
 	if cfg.Gossip {
 		newPubSub = pubsub.NewGossipSub
 	}
+
 	v1b := cid.V1Builder{Codec: cid.Raw, MhType: multihash.SHA2_256}
 	cid, err := v1b.Sum([]byte(masterKey))
 	if err != nil {
 		return nil, err
 	}
+
 	limiters, err := lru.New(cfg.RateLimiterLRUSize)
 	if err != nil {
 		return nil, err
 	}
+
 	myHost := Host{
 		host:           host,
 		cfg:            cfg,
@@ -326,6 +332,7 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		zap.Strings("address", addrs),
 		zap.Bool("secureIO", myHost.cfg.SecureIO),
 		zap.Bool("gossip", myHost.cfg.Gossip))
+
 	return &myHost, nil
 }
 
@@ -569,13 +576,8 @@ func (h *Host) allowSource(src peer.ID) (bool, error) {
 }
 
 // generateKeyPair generates the public key and private key by network address
-func generateKeyPair(masterKey string) (crypto.PrivKey, crypto.PubKey, error) {
-	hash := sha1.Sum([]byte(masterKey))
-	seedBytes := hash[12:]
-	seedBytes[0] = 0
-	seed := int64(binary.BigEndian.Uint64(seedBytes))
-	r := rand.New(rand.NewSource(seed))
-	return crypto.GenerateKeyPairWithReader(crypto.Ed25519, 2048, r)
+func generateKeyPair() (crypto.PrivKey, crypto.PubKey, error) {
+	return crypto.GenerateKeyPairWithReader(crypto.Ed25519, 2048, rand.Reader)
 }
 
 func yamuxTransport() smux.Multiplexer {

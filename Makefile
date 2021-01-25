@@ -26,10 +26,12 @@ else
 	DEBUG_FLAG = -debug
 endif
 
-all: clean build test
+all: clean build test ci lint
 .PHONY: build
 build:
 	$(GOBUILD) -o ./bin/p2p -v ./main
+
+ci: clean lint test
 
 .PHONY: fmt
 fmt:
@@ -37,7 +39,9 @@ fmt:
 
 .PHONY: lint
 lint:
-	go list ./... | grep -v /vendor/ | grep -v /explorer/idl/ | xargs $(GOLINT)
+	golangci-lint --version
+	golangci-lint cache clean
+	golangci-lint run --timeout=5m
 
 .PHONY: test
 test: fmt
@@ -50,7 +54,8 @@ clean:
 	$(ECHO_V)rm -f $(COV_REPORT) $(COV_HTML) $(LINT_LOG)
 	$(ECHO_V)find . -name $(COV_OUT) -delete
 	$(ECHO_V)find . -name $(TESTBED_COV_OUT) -delete
-	$(ECHO_V)$(GOCLEAN) -i $(PKGS)
+	$(ECHO_V)$(GOCLEAN) -i $(PKGS) -cache -testcache
+	@go mod tidy
 
 .PHONY: docker
 docker:

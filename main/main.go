@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
+	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	"io"
 	"net/http"
 	"os"
@@ -105,19 +105,16 @@ func main() {
 		p2p.Logger().Panic("Error when instantiating a host.", zap.Error(err))
 	}
 
-	audit := make(map[string]int, 0)
+	audit := make(map[string]int)
 	var mutex sync.Mutex
 
-	HandleMsg := func(ctx context.Context, data []byte) error {
+	// nolint
+	HandleMsg := func(_ context.Context, data []byte) error {
 		mutex.Lock()
 		defer mutex.Unlock()
 
 		id := string(data)
-		if _, ok := audit[id]; ok {
-			audit[id]++
-		} else {
-			audit[id] = 1
-		}
+		audit[id] += 1
 		if audit[id]%100 == 0 {
 			p2p.Logger().Info("Received messages.", zap.String("id", id), zap.Int("num", audit[id]))
 		}
@@ -146,26 +143,32 @@ func main() {
 	}
 
 	tick := time.Tick(time.Duration(frequency) * time.Millisecond)
-	for {
-		select {
-		case <-tick:
-			var err error
-			if broadcast {
-				err = host.Broadcast("measurement", []byte(fmt.Sprintf("%s", host.HostIdentity())))
-			} else {
-				neighbors, err := host.Neighbors(context.Background())
-				if err != nil {
-					p2p.Logger().Error("Error when getting neighbors.", zap.Error(err))
-				}
-				for _, neighbor := range neighbors {
-					host.Unicast(context.Background(), neighbor, "measurement", []byte(fmt.Sprintf("%s", host.HostIdentity())))
-				}
-			}
+	for range tick {
+		var err error
+		if broadcast {
+			err = host.Broadcast("measurement", []byte(host.HostIdentity()))
+		} else {
+			var neighbors []peerstore.PeerInfo
+			neighbors, err = host.Neighbors(context.Background())
 			if err != nil {
-				p2p.Logger().Error("Error when broadcasting a message.", zap.Error(err))
-			} else {
-				sendCounter.WithLabelValues(host.HostIdentity()).Inc()
+				p2p.Logger().Error("Error when getting neighbors.", zap.Error(err))
 			}
+
+			for _, neighbor := range neighbors {
+				err = host.Unicast(
+					context.Background(),
+					neighbor,
+					"measurement",
+					[]byte(host.HostIdentity()),
+				)
+				p2p.Logger().Panic("Error when performing unicase measurement on neighbour", zap.Error(err))
+			}
+		}
+
+		if err != nil {
+			p2p.Logger().Error("Error when broadcasting a message.", zap.Error(err))
+		} else {
+			sendCounter.WithLabelValues(host.HostIdentity()).Inc()
 		}
 	}
 }

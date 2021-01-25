@@ -13,7 +13,8 @@ require (
 	github.com/libp2p/go-libp2p-discovery v0.5.0
 	github.com/libp2p/go-libp2p-host v0.1.0 // indirect
 	github.com/libp2p/go-libp2p-kad-dht v0.11.1
-	github.com/libp2p/go-libp2p-net v0.1.0
+	github.com/libp2p/go-libp2p-net v0.1.0 // indirect
+	github.com/libp2p/go-libp2p-peerstore v0.2.6
 	github.com/libp2p/go-libp2p-protocol v0.1.0
 	github.com/libp2p/go-libp2p-pubsub v0.4.1
 	github.com/libp2p/go-libp2p-transport-upgrader v0.3.0
@@ -24,7 +25,6 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v0.9.3-0.20190127221311-3c4408c8b829
 	github.com/stretchr/testify v1.6.1
-	github.com/whyrusleeping/go-smux-yamux v2.0.9+incompatible
 	go.uber.org/zap v1.16.0
 	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4
 )

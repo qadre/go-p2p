@@ -1,11 +1,11 @@
 package p2p
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net"
-	"time"
 )
 
 // EnsureIPv4 returns an IPv4 address regardless the input is a IPv4 address or host name. If the host name has multiple
@@ -34,6 +34,11 @@ func EnsureIPv4(ipOrHost string) (string, error) {
 	if len(ips) == 0 {
 		return "", errors.New("no IPv4 address found")
 	}
-	rand.Seed(time.Now().UnixNano())
-	return ips[rand.Intn(len(ips))], nil
+
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(ips))))
+	if err != nil {
+		return "", err
+	}
+
+	return ips[n.Int64()], nil
 }
