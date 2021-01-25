@@ -393,15 +393,16 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 	if err != nil {
 		return err
 	}
+
 	t, err := pub.Join(topic)
 	if err != nil {
 		return err
 	}
+
 	sub, err := t.Subscribe()
 	if err != nil {
 		return err
 	}
-	//h.pubs[topic] = pub
 	h.blacklists[topic] = blacklist
 	h.subs[topic] = sub
 	go func() {
