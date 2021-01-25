@@ -14,7 +14,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/qadre/go-p2p"
+	p2p "github.com/qadre/go-p2p"
 	"go.uber.org/zap"
 )
 

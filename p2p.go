@@ -9,10 +9,8 @@ import (
 	"os"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p"
-	relay "github.com/libp2p/go-libp2p-circuit"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	core "github.com/libp2p/go-libp2p-core"
 	"github.com/libp2p/go-libp2p-core/crypto"
@@ -27,9 +25,7 @@ import (
 	"github.com/libp2p/go-tcp-transport"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"golang.org/x/time/rate"
 )
 
 // HandleBroadcast defines the callback function triggered when a broadcast message reaches a host
@@ -40,61 +36,32 @@ type HandleUnicast func(ctx context.Context, w io.Writer, data []byte) error
 
 // Config enumerates the configs required by a host
 type Config struct {
-	HostName                 string          `yaml:"hostName"`
-	Port                     int             `yaml:"port"`
-	ExternalHostName         string          `yaml:"externalHostName"`
-	ExternalPort             int             `yaml:"externalPort"`
-	SecureIO                 bool            `yaml:"secureIO"`
-	Gossip                   bool            `yaml:"gossip"`
-	ConnectTimeout           time.Duration   `yaml:"connectTimeout"`
-	MasterKey                string          `yaml:"masterKey"`
-	Relay                    string          `yaml:"relay"` // could be `active`, `nat`, `disable`
-	ConnLowWater             int             `yaml:"connLowWater"`
-	ConnHighWater            int             `yaml:"connHighWater"`
-	RateLimiterLRUSize       int             `yaml:"rateLimiterLRUSize"`
-	BlackListLRUSize         int             `yaml:"blackListLRUSize"`
-	BlackListCleanupInterval time.Duration   `yaml:"blackListCleanupInterval"`
-	ConnGracePeriod          time.Duration   `yaml:"connGracePeriod"`
-	EnableRateLimit          bool            `yaml:"enableRateLimit"`
-	RateLimit                RateLimitConfig `yaml:"rateLimit"`
-	PrivateNetworkPSK        string          `yaml:"privateNetworkPSK"`
-}
-
-// RateLimitConfig all numbers are per second value.
-type RateLimitConfig struct {
-	GlobalUnicastAvg   int `yaml:"globalUnicastAvg"`
-	GlobalUnicastBurst int `yaml:"globalUnicastBurst"`
-	PeerAvg            int `yaml:"peerAvg"`
-	PeerBurst          int `yaml:"peerBurst"`
+	HostName         string        `yaml:"hostName"`
+	Port             int           `yaml:"port"`
+	ExternalHostName string        `yaml:"externalHostName"`
+	ExternalPort     int           `yaml:"externalPort"`
+	SecureIO         bool          `yaml:"secureIO"`
+	Gossip           bool          `yaml:"gossip"`
+	ConnectTimeout   time.Duration `yaml:"connectTimeout"`
+	MasterKey        string        `yaml:"masterKey"`
+	ConnLowWater     int           `yaml:"connLowWater"`
+	ConnHighWater    int           `yaml:"connHighWater"`
+	ConnGracePeriod  time.Duration `yaml:"connGracePeriod"`
 }
 
 // DefaultConfig is a set of default configs
 var DefaultConfig = Config{
-	HostName:                 "127.0.0.1",
-	Port:                     30001,
-	ExternalHostName:         "",
-	ExternalPort:             30001,
-	SecureIO:                 false,
-	Gossip:                   false,
-	ConnectTimeout:           time.Minute,
-	MasterKey:                "",
-	Relay:                    "disable",
-	ConnLowWater:             200,
-	ConnHighWater:            500,
-	RateLimiterLRUSize:       1000,
-	BlackListLRUSize:         1000,
-	BlackListCleanupInterval: 600 * time.Second,
-	ConnGracePeriod:          0,
-	EnableRateLimit:          false,
-	RateLimit:                DefaultRatelimitConfig,
-}
-
-// DefaultRatelimitConfig is the default rate limit config
-var DefaultRatelimitConfig = RateLimitConfig{
-	GlobalUnicastAvg:   300,
-	GlobalUnicastBurst: 500,
-	PeerAvg:            300,
-	PeerBurst:          500,
+	HostName:         "127.0.0.1",
+	Port:             30001,
+	ExternalHostName: "",
+	ExternalPort:     30001,
+	SecureIO:         false,
+	Gossip:           false,
+	ConnectTimeout:   time.Minute,
+	MasterKey:        "",
+	ConnLowWater:     200,
+	ConnHighWater:    500,
+	ConnGracePeriod:  0,
 }
 
 // Option defines the option function to modify the config for a host
@@ -164,23 +131,6 @@ func MasterKey(masterKey string) Option {
 	}
 }
 
-// WithRateLimit is to indicate limiting msg rate from peers
-func WithRateLimit(rcfg RateLimitConfig) Option {
-	return func(cfg *Config) error {
-		cfg.EnableRateLimit = true
-		cfg.RateLimit = rcfg
-		return nil
-	}
-}
-
-// WithRelay config relay option.
-func WithRelay(relayType string) Option {
-	return func(cfg *Config) error {
-		cfg.Relay = relayType
-		return nil
-	}
-}
-
 // WithConnectionManagerConfig set configuration for connection manager.
 func WithConnectionManagerConfig(lo, hi int, grace time.Duration) Option {
 	return func(cfg *Config) error {
@@ -193,18 +143,15 @@ func WithConnectionManagerConfig(lo, hi int, grace time.Duration) Option {
 
 // Host is the main struct that represents a host that communicating with the rest of the P2P networks
 type Host struct {
-	host           core.Host
-	cfg            Config
-	topics         map[string]*pubsub.Topic
-	kad            *dht.IpfsDHT
-	kadKey         cid.Cid
-	newPubSub      func(ctx context.Context, h core.Host, opts ...pubsub.Option) (*pubsub.PubSub, error)
-	blacklists     map[string]*LRUBlacklist
-	subs           map[string]*pubsub.Subscription
-	close          chan interface{}
-	ctx            context.Context
-	peersLimiters  *lru.Cache
-	unicastLimiter *rate.Limiter
+	host      core.Host
+	cfg       Config
+	topics    map[string]*pubsub.Topic
+	kad       *dht.IpfsDHT
+	kadKey    cid.Cid
+	newPubSub func(ctx context.Context, h core.Host, opts ...pubsub.Option) (*pubsub.PubSub, error)
+	subs      map[string]*pubsub.Subscription
+	close     chan interface{}
+	ctx       context.Context
 }
 
 // NewHost constructs a host struct
@@ -269,15 +216,6 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		opts = append(opts, libp2p.NoSecurity)
 	}
 
-	// relay option
-	if cfg.Relay == "active" {
-		opts = append(opts, libp2p.EnableRelay(relay.OptActive, relay.OptHop))
-	} else if cfg.Relay == "nat" {
-		opts = append(opts, libp2p.EnableRelay(), libp2p.NATPortMap())
-	} else {
-		opts = append(opts, libp2p.DisableRelay())
-	}
-
 	host, err := libp2p.New(ctx, opts...)
 	if err != nil {
 		return nil, err
@@ -303,24 +241,16 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		return nil, err
 	}
 
-	limiters, err := lru.New(cfg.RateLimiterLRUSize)
-	if err != nil {
-		return nil, err
-	}
-
 	myHost := Host{
-		host:           host,
-		cfg:            cfg,
-		topics:         make(map[string]*pubsub.Topic),
-		kad:            kad,
-		kadKey:         cid,
-		newPubSub:      newPubSub,
-		blacklists:     make(map[string]*LRUBlacklist),
-		subs:           make(map[string]*pubsub.Subscription),
-		close:          make(chan interface{}),
-		ctx:            ctx,
-		peersLimiters:  limiters,
-		unicastLimiter: rate.NewLimiter(rate.Limit(cfg.RateLimit.GlobalUnicastAvg), cfg.RateLimit.GlobalUnicastBurst),
+		host:      host,
+		cfg:       cfg,
+		topics:    make(map[string]*pubsub.Topic),
+		kad:       kad,
+		kadKey:    cid,
+		newPubSub: newPubSub,
+		subs:      make(map[string]*pubsub.Subscription),
+		close:     make(chan interface{}),
+		ctx:       ctx,
 	}
 
 	addrs := make([]string, 0)
@@ -352,10 +282,6 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 				Logger().Error("Error when closing a unicast stream.", zap.Error(err))
 			}
 		}()
-		if h.cfg.EnableRateLimit && !h.unicastLimiter.Allow() {
-			Logger().Warn("Drop unicast sream due to high traffic volume.")
-			return
-		}
 		/*
 			src := stream.Conn().RemotePeer()
 			allowed, err := h.allowSource(src)
@@ -385,14 +311,9 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 // AddBroadcastPubSub adds a broadcast topic that the host will pay attention to. This need to be called before using
 // Connect/JoinOverlay. Otherwise, pubsub may not be aware of the existing overlay topology
 func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error {
-	blacklist, err := NewLRUBlacklist(h.cfg.BlackListLRUSize)
-	if err != nil {
-		return err
-	}
 	pub, err := h.newPubSub(
 		h.ctx,
 		h.host,
-		pubsub.WithBlacklist(blacklist),
 	)
 	if err != nil {
 		return err
@@ -407,7 +328,6 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 	if err != nil {
 		return err
 	}
-	h.blacklists[topic] = blacklist
 	h.subs[topic] = sub
 	go func() {
 		for {
@@ -423,29 +343,11 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 						zap.Error(err), zap.String("topic", topic))
 					continue
 				}
-				src := msg.GetFrom()
-				allowed, err := h.allowSource(src)
-				if err != nil {
-					Logger().Error("Error when checking if the source is allowed.", zap.Error(err))
-					continue
-				}
-				if !allowed {
-					h.blacklists[topic].Add(src)
-					Logger().Warn("Blacklist a peer", zap.Any("id", src))
-					continue
-				}
-				h.blacklists[topic].Remove(src)
 				ctx = context.WithValue(ctx, broadcastCtxKey{}, msg)
 				if err := callback(ctx, msg.Data); err != nil {
 					Logger().Error("Error when processing a broadcast message.", zap.Error(err))
 				}
 			}
-		}
-	}()
-	go func() {
-		for {
-			time.Sleep(h.cfg.BlackListCleanupInterval)
-			h.blacklists[topic].RemoveOldest()
 		}
 	}()
 	return nil
@@ -556,24 +458,6 @@ func (h *Host) Close() error {
 		return err
 	}
 	return nil
-}
-
-func (h *Host) allowSource(src peer.ID) (bool, error) {
-	if !h.cfg.EnableRateLimit {
-		return true, nil
-	}
-	var limiter *rate.Limiter
-	val, ok := h.peersLimiters.Get(src)
-	if ok {
-		limiter, ok = val.(*rate.Limiter)
-		if !ok {
-			return false, errors.New("error when casting to limiter struct")
-		}
-	} else {
-		limiter = rate.NewLimiter(rate.Limit(h.cfg.RateLimit.PeerAvg), h.cfg.RateLimit.PeerBurst)
-		h.peersLimiters.Add(src, limiter)
-	}
-	return limiter.Allow(), nil
 }
 
 // generateKeyPair generates the public key and private key by network address
