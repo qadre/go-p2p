@@ -11,11 +11,6 @@ import (
 	"os"
 	"time"
 
-	smux "github.com/libp2p/go-libp2p-core/mux"
-	yamux "github.com/libp2p/go-libp2p-yamux"
-	"github.com/pkg/errors"
-	"golang.org/x/time/rate"
-
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p"
@@ -23,6 +18,7 @@ import (
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	core "github.com/libp2p/go-libp2p-core"
 	"github.com/libp2p/go-libp2p-core/crypto"
+	smux "github.com/libp2p/go-libp2p-core/mux"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	discovery "github.com/libp2p/go-libp2p-discovery"
@@ -30,10 +26,13 @@ import (
 	protocol "github.com/libp2p/go-libp2p-protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	stream "github.com/libp2p/go-libp2p-transport-upgrader"
+	yamux "github.com/libp2p/go-libp2p-yamux"
 	"github.com/libp2p/go-tcp-transport"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
 // HandleBroadcast defines the callback function triggered when a broadcast message reaches a host
@@ -197,13 +196,12 @@ func WithConnectionManagerConfig(lo, hi int, grace time.Duration) Option {
 
 // Host is the main struct that represents a host that communicating with the rest of the P2P networks
 type Host struct {
-	host      core.Host
-	cfg       Config
-	topics    map[string]*pubsub.Topic
-	kad       *dht.IpfsDHT
-	kadKey    cid.Cid
-	newPubSub func(ctx context.Context, h core.Host, opts ...pubsub.Option) (*pubsub.PubSub, error)
-	//pubs           map[string]*pubsub.PubSub
+	host           core.Host
+	cfg            Config
+	topics         map[string]*pubsub.Topic
+	kad            *dht.IpfsDHT
+	kadKey         cid.Cid
+	newPubSub      func(ctx context.Context, h core.Host, opts ...pubsub.Option) (*pubsub.PubSub, error)
 	blacklists     map[string]*LRUBlacklist
 	subs           map[string]*pubsub.Subscription
 	close          chan interface{}
