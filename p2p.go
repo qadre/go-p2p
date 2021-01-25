@@ -21,7 +21,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	discovery "github.com/libp2p/go-libp2p-discovery"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	protocol "github.com/libp2p/go-libp2p-protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	stream "github.com/libp2p/go-libp2p-transport-upgrader"
 	yamux "github.com/libp2p/go-libp2p-yamux"
@@ -419,7 +418,9 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 				ctx := context.Background()
 				msg, err := sub.Next(ctx)
 				if err != nil {
-					Logger().Error("Error when subscribing a broadcast message.", zap.Error(err))
+					Logger().Error(
+						"Error when subscribing to broadcast",
+						zap.Error(err), zap.String("topic", topic))
 					continue
 				}
 				src := msg.GetFrom()
@@ -492,7 +493,7 @@ func (h *Host) Unicast(ctx context.Context, target peer.AddrInfo, topic string, 
 	if err := h.Connect(ctx, target); err != nil {
 		return err
 	}
-	stream, err := h.host.NewStream(ctx, target.ID, protocol.ID(topic))
+	stream, err := h.host.NewStream(ctx, target.ID, core.ProtocolID(topic))
 	if err != nil {
 		return err
 	}

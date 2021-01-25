@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	"io"
 	"net/http"
 	"os"
@@ -11,11 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/multiformats/go-multiaddr"
-
-	p2p "github.com/iotexproject/go-p2p"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/qadre/go-p2p"
 	"go.uber.org/zap"
 )
 
@@ -148,7 +147,7 @@ func main() {
 		if broadcast {
 			err = host.Broadcast("measurement", []byte(host.HostIdentity()))
 		} else {
-			var neighbors []peerstore.PeerInfo
+			var neighbors []peer.AddrInfo
 			neighbors, err = host.Neighbors(context.Background())
 			if err != nil {
 				p2p.Logger().Error("Error when getting neighbors.", zap.Error(err))

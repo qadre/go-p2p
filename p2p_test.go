@@ -6,6 +6,7 @@ import (
 	"io"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -31,6 +32,7 @@ func TestBroadcast(t *testing.T) {
 			}))
 			hosts[i] = host
 		}
+		time.Sleep(5 * time.Second)
 
 		bootstrapInfo := hosts[0].Info()
 		for i := 0; i < n; i++ {
@@ -75,6 +77,7 @@ func TestUnicast(t *testing.T) {
 		}))
 		hosts[i] = host
 	}
+	time.Sleep(5 * time.Second)
 
 	bootstrapInfo := hosts[0].Info()
 	for i := 0; i < n; i++ {
