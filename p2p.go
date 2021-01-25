@@ -52,9 +52,9 @@ type Config struct {
 // DefaultConfig is a set of default configs
 var DefaultConfig = Config{
 	HostName:         "127.0.0.1",
-	Port:             30001,
+	Port:             7000,
 	ExternalHostName: "",
-	ExternalPort:     30001,
+	ExternalPort:     7000,
 	SecureIO:         false,
 	Gossip:           false,
 	ConnectTimeout:   time.Minute,
@@ -282,18 +282,7 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 				Logger().Error("Error when closing a unicast stream.", zap.Error(err))
 			}
 		}()
-		/*
-			src := stream.Conn().RemotePeer()
-			allowed, err := h.allowSource(src)
-			if err != nil {
-				Logger().Error("Error when checking if the source is allowed.", zap.Error(err))
-				return
-			}
-			if !allowed {
-				// TODO: blacklist src for unicast too
-				return
-			}
-		*/
+
 		data, err := ioutil.ReadAll(stream)
 		if err != nil {
 			Logger().Error("Error when subscribing a unicast message.", zap.Error(err))
@@ -304,6 +293,7 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 			Logger().Error("Error when processing a unicast message.", zap.Error(err))
 		}
 	})
+
 	h.topics[topic] = nil
 	return nil
 }
@@ -350,6 +340,7 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 			}
 		}
 	}()
+
 	return nil
 }
 
@@ -366,6 +357,7 @@ func (h *Host) ConnectWithMultiaddr(ctx context.Context, ma multiaddr.Multiaddr)
 		"P2P peer connected.",
 		zap.String("multiAddress", ma.String()),
 	)
+
 	return nil
 }
 
@@ -378,6 +370,7 @@ func (h *Host) Connect(ctx context.Context, target peer.AddrInfo) error {
 		"P2P peer connected.",
 		zap.String("peer", fmt.Sprintf("%+v", target)),
 	)
+
 	return nil
 }
 
@@ -387,6 +380,7 @@ func (h *Host) Broadcast(topic string, data []byte) error {
 	if !ok {
 		return nil
 	}
+
 	return t.Publish(context.Background(), data)
 }
 
@@ -395,14 +389,17 @@ func (h *Host) Unicast(ctx context.Context, target peer.AddrInfo, topic string, 
 	if err := h.Connect(ctx, target); err != nil {
 		return err
 	}
+
 	stream, err := h.host.NewStream(ctx, target.ID, core.ProtocolID(topic))
 	if err != nil {
 		return err
 	}
+
 	defer func() { err = stream.Close() }()
 	if _, err = stream.Write(data); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -419,6 +416,7 @@ func (h *Host) Addresses() []multiaddr.Multiaddr {
 	for _, addr := range h.host.Addrs() {
 		addrs = append(addrs, addr.Encapsulate(hostID))
 	}
+
 	return addrs
 }
 
@@ -457,6 +455,7 @@ func (h *Host) Close() error {
 	if err := h.host.Close(); err != nil {
 		return err
 	}
+
 	return nil
 }
 
