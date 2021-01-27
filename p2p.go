@@ -134,6 +134,14 @@ func MasterKey(masterKey string) Option {
 	}
 }
 
+// PrivateKey is to determine private key to use for addressing
+func PrivateKey(privateKey string) Option {
+	return func(cfg *Config) error {
+		cfg.PrivateKey = privateKey
+		return nil
+	}
+}
+
 // WithConnectionManagerConfig set configuration for connection manager.
 func WithConnectionManagerConfig(lo, hi int, grace time.Duration) Option {
 	return func(cfg *Config) error {
