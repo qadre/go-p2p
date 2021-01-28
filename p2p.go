@@ -7,23 +7,17 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"os"
 	"time"
 
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p"
-	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	core "github.com/libp2p/go-libp2p-core"
 	"github.com/libp2p/go-libp2p-core/crypto"
-	smux "github.com/libp2p/go-libp2p-core/mux"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	discovery "github.com/libp2p/go-libp2p-discovery"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	stream "github.com/libp2p/go-libp2p-transport-upgrader"
-	yamux "github.com/libp2p/go-libp2p-yamux"
-	"github.com/libp2p/go-tcp-transport"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
 	"go.uber.org/zap"
@@ -154,15 +148,14 @@ func WithConnectionManagerConfig(lo, hi int, grace time.Duration) Option {
 
 // Host is the main struct that represents a host that communicating with the rest of the P2P networks
 type Host struct {
-	host      core.Host
-	cfg       Config
-	topics    map[string]*pubsub.Topic
-	kad       *dht.IpfsDHT
-	kadKey    cid.Cid
-	newPubSub func(ctx context.Context, h core.Host, opts ...pubsub.Option) (*pubsub.PubSub, error)
-	subs      map[string]*pubsub.Subscription
-	close     chan interface{}
-	ctx       context.Context
+	host   core.Host
+	cfg    Config
+	topics map[string]*pubsub.Topic
+	kad    *dht.IpfsDHT
+	kadKey cid.Cid
+	pubSub *pubsub.PubSub
+	close  chan interface{}
+	ctx    context.Context
 }
 
 // NewHost constructs a host struct
@@ -234,11 +227,8 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 			return addrs
 		}),
 		libp2p.Identity(sk),
-		libp2p.Transport(func(upgrader *stream.Upgrader) *tcp.TcpTransport {
-			return &tcp.TcpTransport{Upgrader: upgrader, ConnectTimeout: cfg.ConnectTimeout}
-		}),
-		libp2p.Muxer("/yamux/1.0.0", yamuxTransport()),
-		libp2p.ConnectionManager(connmgr.NewConnManager(cfg.ConnLowWater, cfg.ConnHighWater, cfg.ConnGracePeriod)),
+		libp2p.DefaultTransports,
+		libp2p.DefaultMuxers,
 	}
 	if !cfg.SecureIO {
 		opts = append(opts, libp2p.NoSecurity)
@@ -258,9 +248,15 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		return nil, err
 	}
 
-	newPubSub := pubsub.NewFloodSub
+	newPubSub, err := pubsub.NewFloodSub(context.Background(), host)
+	if err != nil {
+		return nil, err
+	}
 	if cfg.Gossip {
-		newPubSub = pubsub.NewGossipSub
+		newPubSub, err = pubsub.NewGossipSub(context.Background(), host)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	v1b := cid.V1Builder{Codec: cid.Raw, MhType: multihash.SHA2_256}
@@ -270,15 +266,14 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 	}
 
 	myHost := Host{
-		host:      host,
-		cfg:       cfg,
-		topics:    make(map[string]*pubsub.Topic),
-		kad:       kad,
-		kadKey:    cid,
-		newPubSub: newPubSub,
-		subs:      make(map[string]*pubsub.Subscription),
-		close:     make(chan interface{}),
-		ctx:       ctx,
+		host:   host,
+		cfg:    cfg,
+		topics: make(map[string]*pubsub.Topic),
+		kad:    kad,
+		kadKey: cid,
+		pubSub: newPubSub,
+		close:  make(chan interface{}),
+		ctx:    ctx,
 	}
 
 	addrs := make([]string, 0)
@@ -302,8 +297,10 @@ func (h *Host) JoinOverlay(ctx context.Context) {
 // AddUnicastPubSub adds a unicast topic that the host will pay attention to
 func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 	if _, ok := h.topics[topic]; ok {
+		zap.S().Warnf("topic %s already exists, skipping", topic)
 		return nil
 	}
+
 	h.host.SetStreamHandler(core.ProtocolID(topic), func(stream network.Stream) {
 		defer func() {
 			if err := stream.Close(); err != nil {
@@ -322,6 +319,7 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 		}
 	})
 
+	// reset the topic so we can receive more than 1 unicast msg
 	h.topics[topic] = nil
 	return nil
 }
@@ -329,39 +327,32 @@ func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
 // AddBroadcastPubSub adds a broadcast topic that the host will pay attention to. This need to be called before using
 // Connect/JoinOverlay. Otherwise, pubsub may not be aware of the existing overlay topology
 func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error {
-	pub, err := h.newPubSub(
-		h.ctx,
-		h.host,
-	)
+	t, err := h.pubSub.Join(topic)
 	if err != nil {
 		return err
 	}
 
-	t, err := pub.Join(topic)
+	topicSub, err := t.Subscribe()
 	if err != nil {
 		return err
 	}
 
-	sub, err := t.Subscribe()
-	if err != nil {
-		return err
-	}
-	h.subs[topic] = sub
+	h.topics[topic] = t
 	go func() {
 		for {
 			select {
 			case <-h.close:
 				return
 			default:
-				ctx := context.Background()
-				msg, err := sub.Next(ctx)
+				zap.S().Info("received broadcast msg...")
+				msg, err := topicSub.Next(h.ctx)
 				if err != nil {
 					Logger().Error(
 						"Error when subscribing to broadcast",
 						zap.Error(err), zap.String("topic", topic))
 					continue
 				}
-				ctx = context.WithValue(ctx, broadcastCtxKey{}, msg)
+				ctx := context.WithValue(h.ctx, broadcastCtxKey{}, msg)
 				if err := callback(ctx, msg.Data); err != nil {
 					Logger().Error("Error when processing a broadcast message.", zap.Error(err))
 				}
@@ -406,9 +397,11 @@ func (h *Host) Connect(ctx context.Context, target peer.AddrInfo) error {
 func (h *Host) Broadcast(topic string, data []byte) error {
 	t, ok := h.topics[topic]
 	if !ok {
+		zap.S().Warnf("topic %s doesnt exist, unable to broadcast msg", topic)
 		return nil
 	}
 
+	zap.S().Infof("publishing topic: to %d peers %s", topic, len(h.host.Peerstore().Peers()))
 	return t.Publish(context.Background(), data)
 }
 
@@ -468,15 +461,14 @@ func (h *Host) Neighbors(ctx context.Context) ([]peer.AddrInfo, error) {
 	for _, p := range dedupedPeers {
 		neighbors = append(neighbors, h.kad.FindLocal(p))
 	}
+
 	return neighbors, nil
 }
 
 // Close closes the host
 func (h *Host) Close() error {
 	close(h.close)
-	for _, sub := range h.subs {
-		sub.Cancel()
-	}
+
 	if err := h.kad.Close(); err != nil {
 		return err
 	}
@@ -490,14 +482,4 @@ func (h *Host) Close() error {
 // generateKeyPair generates the public key and private key by network address
 func generateKeyPair() (crypto.PrivKey, crypto.PubKey, error) {
 	return crypto.GenerateKeyPairWithReader(crypto.Ed25519, 2048, rand.Reader)
-}
-
-func yamuxTransport() smux.Multiplexer {
-	tpt := *yamux.DefaultTransport
-	tpt.AcceptBacklog = 512
-	if os.Getenv("YAMUX_DEBUG") != "" {
-		tpt.LogOutput = os.Stderr
-	}
-
-	return &tpt
 }

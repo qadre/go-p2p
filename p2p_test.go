@@ -52,6 +52,7 @@ func TestBroadcast(t *testing.T) {
 		for i := 0; i < n; i++ {
 			require.NoError(t, hosts[i].Close())
 		}
+
 	}
 
 	t.Run("flood", func(t *testing.T) {
