@@ -4,7 +4,6 @@ go 1.15
 
 require (
 	github.com/beorn7/perks v1.0.0 // indirect
-	github.com/davecgh/go-spew v1.1.1
 	github.com/ipfs/go-cid v0.0.7
 	github.com/libp2p/go-libp2p v0.12.0
 	github.com/libp2p/go-libp2p-core v0.7.0

@@ -146,6 +146,23 @@ func WithConnectionManagerConfig(lo, hi int, grace time.Duration) Option {
 	}
 }
 
+// HostOperator defines the peer to peer functionality available
+type HostOperator interface {
+	AddBroadcastPubSub(topic string, callback HandleBroadcast) error
+	AddUnicastPubSub(topic string, callback HandleUnicast) error
+	Addresses() []multiaddr.Multiaddr
+	Broadcast(topic string, data []byte) error
+	Close() error
+	ConnectWithMultiaddr(ctx context.Context, ma multiaddr.Multiaddr) error
+	Connect(ctx context.Context, target peer.AddrInfo) error
+	HostIdentity() string
+	Info() peer.AddrInfo
+	JoinOverlay(ctx context.Context)
+	Neighbors(ctx context.Context) ([]peer.AddrInfo, error)
+	OverlayIdentity() string
+	Unicast(ctx context.Context, target peer.AddrInfo, topic string, data []byte) error
+}
+
 // Host is the main struct that represents a host that communicating with the rest of the P2P networks
 type Host struct {
 	host   core.Host
