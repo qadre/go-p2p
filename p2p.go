@@ -146,7 +146,7 @@ func WithConnectionManagerConfig(lo, hi int, grace time.Duration) Option {
 	}
 }
 
-// P2PHost ...
+// P2PHost defines the peer to peer functionality available
 type P2PHost interface {
 	AddBroadcastPubSub(topic string, callback HandleBroadcast) error
 	AddUnicastPubSub(topic string, callback HandleUnicast) error
