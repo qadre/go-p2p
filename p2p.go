@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"time"
 
+	"github.com/iotexproject/go-p2p"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p"
 	core "github.com/libp2p/go-libp2p-core"
@@ -144,6 +145,23 @@ func WithConnectionManagerConfig(lo, hi int, grace time.Duration) Option {
 		cfg.ConnGracePeriod = grace
 		return nil
 	}
+}
+
+// P2PHost ...
+type P2PHost interface {
+	JoinOverlay(ctx context.Context)
+	AddUnicastPubSub(topic string, callback p2p.HandleUnicast) error
+	AddBroadcastPubSub(topic string, callback p2p.HandleBroadcast) error
+	ConnectWithMultiaddr(ctx context.Context, ma multiaddr.Multiaddr) error
+	Connect(ctx context.Context, target peer.AddrInfo) error
+	Broadcast(topic string, data []byte) error
+	Unicast(ctx context.Context, target peer.AddrInfo, topic string, data []byte) error
+	HostIdentity() string
+	OverlayIdentity() string
+	Addresses() []multiaddr.Multiaddr
+	Info() peer.AddrInfo
+	Neighbors(ctx context.Context) ([]peer.AddrInfo, error)
+	Close() error
 }
 
 // Host is the main struct that represents a host that communicating with the rest of the P2P networks
