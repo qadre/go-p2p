@@ -146,8 +146,8 @@ func WithConnectionManagerConfig(lo, hi int, grace time.Duration) Option {
 	}
 }
 
-// P2PHost defines the peer to peer functionality available
-type P2PHost interface {
+// HostOperator defines the peer to peer functionality available
+type HostOperator interface {
 	AddBroadcastPubSub(topic string, callback HandleBroadcast) error
 	AddUnicastPubSub(topic string, callback HandleUnicast) error
 	Addresses() []multiaddr.Multiaddr
