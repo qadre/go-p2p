@@ -401,7 +401,7 @@ func (h *Host) Broadcast(topic string, data []byte) error {
 		return nil
 	}
 
-	zap.S().Infof("publishing topic: to %d peers %s", topic, len(h.host.Peerstore().Peers()))
+	zap.S().Infof("publishing topic: %s to peers %d", topic, len(h.host.Peerstore().Peers()))
 	return t.Publish(context.Background(), data)
 }
 
@@ -475,7 +475,6 @@ func (h *Host) Close() error {
 	if err := h.host.Close(); err != nil {
 		return err
 	}
-
 	return nil
 }
 
