@@ -361,7 +361,6 @@ func (h *Host) AddBroadcastPubSub(topic string, callback HandleBroadcast) error 
 			case <-h.close:
 				return
 			default:
-				zap.S().Info("received broadcast msg...")
 				msg, err := topicSub.Next(h.ctx)
 				if err != nil {
 					Logger().Error(
@@ -418,7 +417,6 @@ func (h *Host) Broadcast(topic string, data []byte) error {
 		return nil
 	}
 
-	zap.S().Infof("publishing topic: %s to peers %d", topic, len(h.host.Peerstore().Peers()))
 	return t.Publish(context.Background(), data)
 }
 
