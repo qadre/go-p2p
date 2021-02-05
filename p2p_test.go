@@ -39,7 +39,7 @@ func TestBroadcast(t *testing.T) {
 			if i != 0 {
 				require.NoError(t, hosts[i].Connect(ctx, bootstrapInfo))
 			}
-			hosts[i].JoinOverlay(ctx)
+			go hosts[i].Discover(ctx, hosts[i].DHT(), "huski-network")
 		}
 
 		for i := 0; i < n; i++ {
@@ -85,7 +85,7 @@ func TestUnicast(t *testing.T) {
 		if i != 0 {
 			require.NoError(t, hosts[i].Connect(ctx, bootstrapInfo))
 		}
-		hosts[i].JoinOverlay(ctx)
+		go hosts[i].Discover(ctx, hosts[i].DHT(), "huski-network")
 	}
 
 	for i, host := range hosts {

@@ -43,6 +43,7 @@ type Config struct {
 	ConnLowWater     int           `yaml:"connLowWater"`
 	ConnHighWater    int           `yaml:"connHighWater"`
 	ConnGracePeriod  time.Duration `yaml:"connGracePeriod"`
+	Bootnode         bool
 }
 
 // DefaultConfig is a set of default configs
@@ -112,6 +113,14 @@ func Gossip() Option {
 	}
 }
 
+// BootNode determines whether this libp2p host is a bootnode.
+func BootNode() Option {
+	return func(cfg *Config) error {
+		cfg.Bootnode = true
+		return nil
+	}
+}
+
 // ConnectTimeout is the option to override the connect timeout
 func ConnectTimeout(timout time.Duration) Option {
 	return func(cfg *Config) error {
@@ -155,6 +164,8 @@ type HostOperator interface {
 	Close() error
 	ConnectWithMultiaddr(ctx context.Context, ma multiaddr.Multiaddr) error
 	Connect(ctx context.Context, target peer.AddrInfo) error
+	Discover(ctx context.Context, dht *dht.IpfsDHT, rendezvous string)
+	DHT() *dht.IpfsDHT
 	HostIdentity() string
 	Info() peer.AddrInfo
 	JoinOverlay(ctx context.Context)
@@ -256,7 +267,13 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		return nil, err
 	}
 
-	kad, err := dht.New(ctx, host)
+	var dhtOpts []dht.Option
+	if cfg.Bootnode {
+		zap.S().Debug("configuring server mode for DHT on bootnode")
+		dhtOpts = append(dhtOpts, dht.Mode(dht.ModeServer))
+	}
+
+	kad, err := dht.New(ctx, host, dhtOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -303,6 +320,48 @@ func NewHost(ctx context.Context, options ...Option) (*Host, error) {
 		zap.Bool("gossip", myHost.cfg.Gossip))
 
 	return &myHost, nil
+}
+
+// DHT returns the DHT of the host.
+func (h *Host) DHT() *dht.IpfsDHT {
+	return h.kad
+}
+
+// Discover discovers peers on the network.
+func (h *Host) Discover(ctx context.Context, dht *dht.IpfsDHT, rendezvous string) {
+	zap.S().Infof("attempting to discovery peers on %s", rendezvous)
+	var routingDiscovery = discovery.NewRoutingDiscovery(dht)
+	discovery.Advertise(ctx, routingDiscovery, rendezvous)
+
+	ticker := time.NewTimer(time.Second * 1)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			peers, err := discovery.FindPeers(ctx, routingDiscovery, rendezvous)
+			if err != nil {
+				zap.S().Fatal(err)
+			}
+			zap.S().Debugf("found %d peers in network", len(peers))
+
+			for _, p := range peers {
+				if p.ID.Pretty() == h.HostIdentity() {
+					continue
+				}
+
+				if h.host.Network().Connectedness(p.ID) != network.Connected {
+					_, err = h.host.Network().DialPeer(ctx, p.ID)
+					zap.S().Infof("Connected to peer %s\n", p.ID.Pretty())
+					if err != nil {
+						continue
+					}
+				}
+			}
+		}
+	}
 }
 
 // JoinOverlay triggers the host to join the DHT overlay
