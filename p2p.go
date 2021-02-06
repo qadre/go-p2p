@@ -475,7 +475,7 @@ func (h *Host) Broadcast(topic string, data []byte) error {
 		zap.S().Warnf("topic %s doesnt exist, unable to broadcast msg", topic)
 		return nil
 	}
-
+	zap.S().Debug("broadcasting to %d peers", len(h.host.Peerstore().Peers()))
 	return t.Publish(context.Background(), data)
 }
 
