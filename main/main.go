@@ -3,7 +3,8 @@ package main
 import (
 	"context"
 	"flag"
-	"io"
+	"github.com/libp2p/go-libp2p-core/network"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
@@ -120,13 +121,19 @@ func main() {
 		receiveCounter.WithLabelValues(id, host.HostIdentity()).Inc()
 		return nil
 	}
-	HandleUnicastMsg := func(ctx context.Context, w io.Writer, data []byte) error {
-		return HandleMsg(ctx, data)
-	}
 	if err := host.AddBroadcastPubSub("measurement", HandleMsg); err != nil {
 		p2p.Logger().Panic("Error when adding broadcast pubsub.", zap.Error(err))
 	}
-	if err := host.AddUnicastPubSub("measurement", HandleUnicastMsg); err != nil {
+	if err := host.AddUnicastPubSub("measurement", func(stream network.Stream) {
+		bytes, err := ioutil.ReadAll(stream)
+		if err != nil {
+			panic(err)
+		}
+		err = HandleMsg(context.Background(), bytes)
+		if err != nil {
+			panic(err)
+		}
+	}); err != nil {
 		p2p.Logger().Panic("Error when adding unicast pubsub", zap.Error(err))
 	}
 
@@ -154,7 +161,7 @@ func main() {
 			}
 
 			for _, neighbor := range neighbors {
-				err = host.Unicast(
+				_, err = host.Unicast(
 					context.Background(),
 					neighbor,
 					"measurement",

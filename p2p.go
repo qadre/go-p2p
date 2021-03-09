@@ -5,8 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -25,9 +23,6 @@ import (
 
 // HandleBroadcast defines the callback function triggered when a broadcast message reaches a host
 type HandleBroadcast func(ctx context.Context, data []byte) error
-
-// HandleUnicast defines the callback function triggered when a unicast message reaches a host
-type HandleUnicast func(ctx context.Context, w io.Writer, data []byte) error
 
 // Config enumerates the configs required by a host
 type Config struct {
@@ -158,7 +153,7 @@ func WithConnectionManagerConfig(lo, hi int, grace time.Duration) Option {
 // HostOperator defines the peer to peer functionality available
 type HostOperator interface {
 	AddBroadcastPubSub(topic string, callback HandleBroadcast) error
-	AddUnicastPubSub(topic string, callback HandleUnicast) error
+	AddUnicastPubSub(topic string, callback network.StreamHandler) error
 	Addresses() []multiaddr.Multiaddr
 	Broadcast(topic string, data []byte) error
 	Close() error
@@ -171,7 +166,7 @@ type HostOperator interface {
 	JoinOverlay(ctx context.Context)
 	Neighbors(ctx context.Context) ([]peer.AddrInfo, error)
 	OverlayIdentity() string
-	Unicast(ctx context.Context, target peer.AddrInfo, topic string, data []byte) error
+	Unicast(ctx context.Context, target peer.AddrInfo, topic string, data []byte) (network.Stream, error)
 }
 
 // Host is the main struct that represents a host that communicating with the rest of the P2P networks
@@ -371,29 +366,13 @@ func (h *Host) JoinOverlay(ctx context.Context) {
 }
 
 // AddUnicastPubSub adds a unicast topic that the host will pay attention to
-func (h *Host) AddUnicastPubSub(topic string, callback HandleUnicast) error {
+func (h *Host) AddUnicastPubSub(topic string, handler network.StreamHandler) error {
 	if _, ok := h.topics[topic]; ok {
 		zap.S().Warnf("topic %s already exists, skipping", topic)
 		return nil
 	}
 
-	h.host.SetStreamHandler(core.ProtocolID(topic), func(stream network.Stream) {
-		defer func() {
-			if err := stream.Close(); err != nil {
-				Logger().Error("Error when closing a unicast stream.", zap.Error(err))
-			}
-		}()
-
-		data, err := ioutil.ReadAll(stream)
-		if err != nil {
-			Logger().Error("Error when subscribing a unicast message.", zap.Error(err))
-			return
-		}
-		ctx := context.WithValue(context.Background(), unicastCtxKey{}, stream)
-		if err := callback(ctx, stream, data); err != nil {
-			Logger().Error("Error when processing a unicast message.", zap.Error(err))
-		}
-	})
+	h.host.SetStreamHandler(core.ProtocolID(topic), handler)
 
 	// reset the topic so we can receive more than 1 unicast msg
 	h.topics[topic] = nil
@@ -479,23 +458,28 @@ func (h *Host) Broadcast(topic string, data []byte) error {
 	return t.Publish(context.Background(), data)
 }
 
-// Unicast sends a message to a peer on the given address
-func (h *Host) Unicast(ctx context.Context, target peer.AddrInfo, topic string, data []byte) error {
+// Unicast sends a message to a peer on the given address. The returned stream can be used for reading but closed for writing
+// when finished, the caller must close or reset the stream.
+func (h *Host) Unicast(ctx context.Context, target peer.AddrInfo, topic string, data []byte) (network.Stream, error) {
 	if err := h.Connect(ctx, target); err != nil {
-		return err
+		return nil, err
 	}
 
 	stream, err := h.host.NewStream(ctx, target.ID, core.ProtocolID(topic))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	defer func() { err = stream.Close() }()
 	if _, err = stream.Write(data); err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	if err = stream.CloseWrite(); err != nil {
+		err = stream.Reset()
+		return nil, err
+	}
+
+	return stream, nil
 }
 
 // HostIdentity returns the host identity string

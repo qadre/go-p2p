@@ -3,8 +3,11 @@ package p2p
 import (
 	"context"
 	"fmt"
-	"io"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/stretchr/testify/assert"
+	"io/ioutil"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -71,10 +74,8 @@ func TestUnicast(t *testing.T) {
 	for i := 0; i < n; i++ {
 		host, err := NewHost(ctx, Port(30000+i), SecureIO(), MasterKey(strconv.Itoa(i)))
 		require.NoError(t, err)
-		require.NoError(t, host.AddUnicastPubSub("test", func(ctx context.Context, w io.Writer, data []byte) error {
-			fmt.Print(string(data))
+		require.NoError(t, host.AddUnicastPubSub("test", func(stream network.Stream) {
 			fmt.Printf(", received by %s\n", host.HostIdentity())
-			return nil
 		}))
 		hosts[i] = host
 	}
@@ -94,9 +95,10 @@ func TestUnicast(t *testing.T) {
 		require.True(t, len(neighbors) > 0)
 
 		for _, neighbor := range neighbors {
+			_, err := host.Unicast(ctx, neighbor, "test", []byte(fmt.Sprintf("msg sent from %s", hosts[i].HostIdentity())))
 			require.NoError(
 				t,
-				host.Unicast(ctx, neighbor, "test", []byte(fmt.Sprintf("msg sent from %s", hosts[i].HostIdentity()))),
+				err,
 			)
 		}
 	}
@@ -104,4 +106,39 @@ func TestUnicast(t *testing.T) {
 	for i := 0; i < n; i++ {
 		require.NoError(t, hosts[i].Close())
 	}
+}
+
+func TestUnicast_ReadReturnedStream(t *testing.T) {
+	ctx := context.Background()
+	p1, err := NewHost(ctx, Port(30000+1), SecureIO(), MasterKey(strconv.Itoa(1)))
+	assert.NoError(t, err)
+	p2, err := NewHost(ctx, Port(30000+2), SecureIO(), MasterKey(strconv.Itoa(2)))
+	assert.NoError(t, err)
+
+	require.NoError(t, p1.Connect(ctx, p2.Info()))
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	require.NoError(t, p2.AddUnicastPubSub("test", func(stream network.Stream) {
+		bytes, err := ioutil.ReadAll(stream)
+		require.NoError(t, err)
+		assert.Equal(t, "ping", string(bytes))
+
+		_, err = stream.Write([]byte("pong"))
+		require.NoError(t, err)
+		defer assert.NoError(t, stream.CloseWrite())
+		wg.Done()
+	}))
+
+	stream, err := p1.Unicast(ctx, p2.Info(), "test", []byte("ping"))
+	require.NoError(t, err)
+
+	wg.Wait()
+
+	bytes, err := ioutil.ReadAll(stream)
+	require.NoError(t, err)
+	assert.Equal(t, "pong", string(bytes))
+
+	require.NoError(t, p1.Close())
+	require.NoError(t, p2.Close())
 }
